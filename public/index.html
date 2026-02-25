@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<title>eKollect Congo</title>
+<link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css"/>
+</head>
+<body>
+
+<header>
+  <h1>🌍 eKollect Congo</h1>
+  <p>Signalons les déchets pour protéger nos villes et nos eaux</p>
+</header>
+
+<div class="container">
+
+  <form action="/report" method="POST" enctype="multipart/form-data">
+    <h3>📍 Signaler un déchet</h3>
+    <input type="text" name="description" placeholder="Description" required>
+    <input type="file" name="image">
+    <input type="hidden" name="latitude" id="lat">
+    <input type="hidden" name="longitude" id="lng">
+    <button type="submit">Envoyer</button>
+  </form>
+
+  <div id="map"></div>
+
+  <div class="section">
+    <h3>🌱 Pourquoi agir ?</h3>
+    <p>
+      Les déchets polluent nos quartiers et nos rivières.
+      eKollect aide à protéger notre environnement.
+    </p>
+  </div>
+
+  <div class="section">
+    <h3>📊 Impact</h3>
+    <p id="stats">Chargement...</p>
+  </div>
+
+</div>
+
+<footer>
+© 2026 eKollect Congo
+</footer>
+
+<script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+
+<script>
+// Carte
+const map = L.map('map').setView([-4.266, 15.283], 13);
+
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+ attribution: '© OpenStreetMap'
+}).addTo(map);
+
+// géolocalisation
+navigator.geolocation.getCurrentPosition(pos => {
+ document.getElementById('lat').value = pos.coords.latitude;
+ document.getElementById('lng').value = pos.coords.longitude;
+ map.setView([pos.coords.latitude, pos.coords.longitude], 15);
+});
+
+// afficher signalements
+fetch('/reports')
+.then(res => res.json())
+.then(data => {
+
+ document.getElementById('stats').innerHTML =
+   "Signalements : <b>" + data.length + "</b>";
+
+ data.forEach(r => {
+   const marker = L.marker([r.latitude, r.longitude]).addTo(map);
+   let popup = `<b>${r.description}</b>`;
+   if(r.image) popup += `<br><img src="${r.image}" width="100">`;
+   marker.bindPopup(popup);
+ });
+
+});
+</script>
+
+</body>
+</html>
