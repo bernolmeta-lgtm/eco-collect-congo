@@ -1,68 +1,91 @@
+// server.js
 const express = require('express');
+const cors = require('cors');
 const multer = require('multer');
+const sqlite3 = require('sqlite3').verbose();
 const path = require('path');
-const fs = require('fs');
-const db = require('./db');
 
 const app = express();
 
-// servir fichiers statiques
-app.use(express.static('public'));
+// Middleware
+app.use(cors());
+app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+app.use(express.static('public')); // sert les fichiers front-end
 
-// 📁 vérifier dossier uploads
-const uploadPath = path.join(__dirname, 'public/uploads');
-
-if (!fs.existsSync(uploadPath)) {
-  fs.mkdirSync(uploadPath, { recursive: true });
-}
-
-// configuration multer
-const storage = multer.diskStorage({
-  destination: uploadPath,
-  filename: (req, file, cb) => {
-    cb(null, Date.now() + path.extname(file.originalname));
-  }
+// === SQLite setup ===
+const DB_PATH = './green.db';
+const db = new sqlite3.Database(DB_PATH, (err) => {
+  if (err) console.error('Erreur DB:', err.message);
+  else console.log('SQLite connecté');
 });
 
-const upload = multer({ storage });
+// Table reports
+db.run(`CREATE TABLE IF NOT EXISTS reports (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT,
+  description TEXT,
+  file TEXT,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+)`);
 
+// === Multer setup pour uploads ===
+const storage = multer.diskStorage({
+  destination: function (req, file, cb) {
+    cb(null, 'uploads/');
+  },
+  filename: function (req, file, cb) {
+    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
+    cb(null, uniqueSuffix + path.extname(file.originalname));
+  }
+});
+const upload = multer({ storage: storage });
 
-// ============================
-// ENVOI SIGNALEMENT
-// ============================
-app.post('/report', upload.single('image'), (req, res) => {
+// === Routes ===
 
-  const { description, latitude, longitude } = req.body;
+// Page d'accueil
+app.get('/', (req, res) => {
+  res.sendFile(__dirname + '/public/index.html');
+});
 
-  const image = req.file ? `/uploads/${req.file.filename}` : null;
+// API test
+app.get('/api/status', (req, res) => {
+  res.json({ status: 'success', message: 'API is working!' });
+});
+
+// Ajouter un rapport avec fichier
+app.post('/api/report', upload.single('file'), (req, res) => {
+  const { name, description } = req.body;
+  const file = req.file ? req.file.filename : null;
 
   db.run(
-    `INSERT INTO reports (description, image, latitude, longitude)
-     VALUES (?, ?, ?, ?)`,
-    [description, image, latitude, longitude],
+    `INSERT INTO reports (name, description, file) VALUES (?, ?, ?)`,
+    [name, description, file],
     function(err) {
       if (err) {
-        console.log(err.message);
-        return res.send("Erreur serveur");
+        console.error(err.message);
+        res.status(500).json({ status: 'error', message: 'DB error' });
+      } else {
+        res.json({ status: 'success', reportId: this.lastID });
       }
-      res.redirect('/');
     }
   );
 });
 
-
-// ============================
-// RECUPERER SIGNALEMENTS
-// ============================
-app.get('/reports', (req, res) => {
-  db.all("SELECT * FROM reports", [], (err, rows) => {
-    if (err) return res.send(err.message);
-    res.json(rows);
+// Lister tous les rapports
+app.get('/api/reports', (req, res) => {
+  db.all(`SELECT * FROM reports ORDER BY created_at DESC`, [], (err, rows) => {
+    if (err) {
+      console.error(err.message);
+      res.status(500).json({ status: 'error', message: 'DB error' });
+    } else {
+      res.json({ status: 'success', reports: rows });
+    }
   });
 });
 
-
-app.listen(3000, () => {
-  console.log("Server running on http://localhost:3000");
+// Port dynamique pour Railway
+const PORT = process.env.PORT || 5000;
+app.listen(PORT, () => {
+  console.log(`Server running on port ${PORT}`);
 });
