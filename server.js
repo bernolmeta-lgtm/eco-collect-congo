@@ -1,90 +1,84 @@
 // server.js
 const express = require('express');
-const cors = require('cors');
+const path = require('path');
 const multer = require('multer');
 const sqlite3 = require('sqlite3').verbose();
-const path = require('path');
+const fs = require('fs');
 
 const app = express();
 
 // Middleware
-app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
-app.use(express.static('public')); // sert les fichiers front-end
 
-// === SQLite setup ===
-const DB_PATH = './green.db';
-const db = new sqlite3.Database(DB_PATH, (err) => {
-  if (err) console.error('Erreur DB:', err.message);
-  else console.log('SQLite connecté');
-});
+// Upload configuration
+const uploadFolder = path.join(__dirname, 'uploads');
+if (!fs.existsSync(uploadFolder)) fs.mkdirSync(uploadFolder);
 
-// Table reports
-db.run(`CREATE TABLE IF NOT EXISTS reports (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  name TEXT,
-  description TEXT,
-  file TEXT,
-  created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-)`);
-
-// === Multer setup pour uploads ===
 const storage = multer.diskStorage({
-  destination: function (req, file, cb) {
-    cb(null, 'uploads/');
-  },
-  filename: function (req, file, cb) {
+  destination: (req, file, cb) => cb(null, uploadFolder),
+  filename: (req, file, cb) => {
     const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
-    cb(null, uniqueSuffix + path.extname(file.originalname));
+    cb(null, uniqueSuffix + '-' + file.originalname);
   }
 });
-const upload = multer({ storage: storage });
+const upload = multer({ storage });
 
-// === Routes ===
-
-// Page d'accueil
-app.get('/', (req, res) => {
-  res.sendFile(__dirname + '/public/index.html');
+// --- Database ---
+const db = new sqlite3.Database(path.join(__dirname, 'reports.db'), (err) => {
+  if (err) console.error('DB connection error:', err);
+  else console.log('SQLite3 connecté');
 });
 
-// API test
+db.serialize(() => {
+  db.run(`CREATE TABLE IF NOT EXISTS reports (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    description TEXT NOT NULL,
+    file TEXT,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP
+  )`);
+});
+
+// --- API Routes ---
 app.get('/api/status', (req, res) => {
-  res.json({ status: 'success', message: 'API is working!' });
+  res.json({ status: 'success', message: 'API fonctionne !' });
 });
 
-// Ajouter un rapport avec fichier
 app.post('/api/report', upload.single('file'), (req, res) => {
   const { name, description } = req.body;
   const file = req.file ? req.file.filename : null;
 
+  if (!name || !description) return res.json({ status: 'error', message: 'Champs manquants' });
+
   db.run(
     `INSERT INTO reports (name, description, file) VALUES (?, ?, ?)`,
     [name, description, file],
-    function(err) {
-      if (err) {
-        console.error(err.message);
-        res.status(500).json({ status: 'error', message: 'DB error' });
-      } else {
-        res.json({ status: 'success', reportId: this.lastID });
-      }
+    function (err) {
+      if (err) return res.json({ status: 'error', message: err.message });
+      res.json({ status: 'success', id: this.lastID });
     }
   );
 });
 
-// Lister tous les rapports
 app.get('/api/reports', (req, res) => {
   db.all(`SELECT * FROM reports ORDER BY created_at DESC`, [], (err, rows) => {
-    if (err) {
-      console.error(err.message);
-      res.status(500).json({ status: 'error', message: 'DB error' });
-    } else {
-      res.json({ status: 'success', reports: rows });
-    }
+    if (err) return res.json({ status: 'error', message: err.message });
+    res.json({ status: 'success', reports: rows });
   });
 });
 
-// Port dynamique pour Railway
+// --- Front-end ---
+app.use(express.static(path.join(__dirname, 'public')));
+
+// Catch-all SPA route (safe)
+app.get(/.*/, (req, res) => {
+  if (!req.path.startsWith('/api')) {
+    res.sendFile(path.join(__dirname, 'public', 'index.html'));
+  }
+});
+
+// --- Start server ---
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
